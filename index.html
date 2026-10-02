@@ -15,20 +15,22 @@ canvas{position:fixed;inset:0;width:100%;height:100%}
 #loading,#calib,#result{background:rgba(10,8,32,.96)}
 h1{font-size:clamp(26px,7vh,50px);letter-spacing:.22em;font-weight:900;background:linear-gradient(90deg,#4dd2ff,#b86bff,#ff5fa2,#ffd24d);-webkit-background-clip:text;background-clip:text;color:transparent}
 .play{width:min(27vh,150px);height:min(27vh,150px);border-radius:50%;border:none;font-size:min(11vh,54px);padding-left:.1em;color:#fff;background:radial-gradient(circle at 35% 30%,#ff8ac8,#6a35ff);box-shadow:0 0 44px rgba(160,90,255,.7);animation:pulse 1.5s ease-in-out infinite}
-@keyframes pulse{50%{transform:scale(1.07);box-shadow:0 0 80px rgba(184,107,255,1)}}
+@keyframes pulse{50%{box-shadow:0 0 80px rgba(184,107,255,1)}}
 .row{display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap}
 .chip{padding:9px 18px;border-radius:20px;border:1px solid #ffffff33;background:#ffffff10;color:#fff;font-size:14px;font-family:inherit}
 .chip.sel{background:#6a35ff;border-color:#b86bff}
 .sub{font-size:13px;color:#a09ac4;line-height:1.5}
 .big{font-size:clamp(22px,6vh,40px);font-weight:800}
 #rot{position:fixed;inset:0;z-index:99;background:#0a0820;display:none;align-items:center;justify-content:center;font-size:20px;line-height:1.6;text-align:center;padding:30px}
-@media(orientation:portrait){#rot{display:flex}}
+#root{position:fixed;left:0;top:0;overflow:hidden}
+.play{position:relative;z-index:2}.play::after{content:'';position:absolute;inset:-18px;border-radius:50%}
+#title{gap:8px}
 #hud{position:fixed;top:calc(8px + env(safe-area-inset-top));left:calc(12px + env(safe-area-inset-left));right:calc(12px + env(safe-area-inset-right));display:none;justify-content:space-between;align-items:center;pointer-events:none;font-weight:800;font-size:20px;font-variant-numeric:tabular-nums}
 #hud.on{display:flex}
-#quit{pointer-events:auto;background:#ffffff1c;border:none;color:#fff;width:34px;height:34px;border-radius:50%;font-size:14px}
+#quit{pointer-events:auto;background:#ffffff26;border:none;color:#fff;width:56px;height:56px;border-radius:50%;font-size:20px;margin:-10px;touch-action:manipulation}
 #grade{font-size:clamp(50px,18vh,100px);font-weight:900;background:linear-gradient(90deg,#4dd2ff,#ff5fa2);-webkit-background-clip:text;background-clip:text;color:transparent;line-height:1}
 </style></head><body>
-<canvas id="c"></canvas>
+<div id="root"><canvas id="c"></canvas>
 <div id="hud"><button id="quit">✕</button><div id="score">0</div></div>
 
 <div class="screen on" id="title">
@@ -51,17 +53,17 @@ h1{font-size:clamp(26px,7vh,50px);letter-spacing:.22em;font-weight:900;backgroun
   <div id="grade">S</div><div class="big" id="rScore">0</div><div class="sub" id="rDet"></div>
   <div class="row"><button class="chip sel" id="rAgain">다시하기</button><button class="chip" id="rHome">처음으로</button></div>
 </div>
-<div id="rot">📱↻<br>폰을 가로로 돌려주세요</div>
+</div>
 <label id="hap" style="position:fixed;left:-99px;top:0;opacity:0;pointer-events:none"><input type="checkbox" switch></label>
 <input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac" style="display:none">
 
 <script>
 const $=id=>document.getElementById(id),cv=$('c'),g=cv.getContext('2d');
-let W,H,bgG=null;
-function resize(){const r=Math.min(devicePixelRatio||1,1.5);W=innerWidth;H=innerHeight;cv.width=W*r;cv.height=H*r;g.setTransform(r,0,0,r,0,0);bgG=null}
-addEventListener('resize',resize);resize();
+let W,H,bgG=null,rot=false;
+function resize(){const iw=innerWidth,ih=innerHeight,r=Math.min(devicePixelRatio||1,1.5),s=$('root').style;rot=ih>iw;W=rot?ih:iw;H=rot?iw:ih;s.width=W+'px';s.height=H+'px';s.transformOrigin='0 0';s.transform=rot?`translateX(${iw}px) rotate(90deg)`:'none';cv.width=W*r;cv.height=H*r;g.setTransform(r,0,0,r,0,0);bgG=null}
+addEventListener('resize',resize);addEventListener('orientationchange',()=>setTimeout(resize,200));resize();
 const RGB=[[77,210,255],[184,107,255],[255,95,162],[255,210,77]],rgba=(l,a)=>`rgba(${RGB[l]},${a})`;
-const DIFF={easy:{k:1.9,gap:.36,ch:99},normal:{k:1.5,gap:.24,ch:2.4},hard:{k:1.2,gap:.15,ch:1.7}};
+const DIFF={easy:{k:1.9,gap:.36,ch:99,sub:2,tol:.07,hold:.5},normal:{k:1.5,gap:.24,ch:2.4,sub:2,tol:.06,hold:.6},hard:{k:1.2,gap:.15,ch:1.7,sub:4,tol:.05,hold:.6}};
 let diff=localStorage.getItem('rg-diff')||'normal',offset=+localStorage.getItem('rg-off')||0,sfxOn=localStorage.getItem('rg-sfx')!=='0',vibOn=localStorage.getItem('rg-vib')!=='0';
 let ctx=null;
 function initCtx(){if(!ctx)ctx=new(window.AudioContext||window.webkitAudioContext)();if(ctx.state!=='running')ctx.resume()}
@@ -87,11 +89,6 @@ async function analyze(buf,d,onP){
   ml=ml/nb+1e-9;mh=mh/nb+1e-9;
   const nl=new Float32Array(nb),nh=new Float32Array(nb),env=new Float32Array(nb);
   for(let b=0;b<nb;b++){nl[b]=fl[b]/ml;nh[b]=fh[b]/mh;env[b]=nl[b]+nh[b]*.8}
-  // BPM / 박자 위상
-  let bL=0,bS=-1;const minL=Math.round(sr/hop/3),maxL=Math.round(sr/hop);
-  for(let L=minL;L<=maxL;L++){let s=0;for(let b=0;b+L<nb;b++)s+=env[b]*env[b+L];s/=nb-L;if(s>bS){bS=s;bL=L}}
-  let bp=0,bs=-1;for(let p=0;p<bL;p++){let s=0;for(let b=p;b<nb;b+=bL)s+=env[b];if(s>bs){bs=s;bp=p}}
-  const bpm=60*sr/hop/bL,period=bL*hop/sr,phase=bp*hop/sr;
   // 온셋 피크
   const pre=new Float64Array(nb+1);for(let b=0;b<nb;b++)pre[b+1]=pre[b]+env[b];
   const cand=[];
@@ -100,45 +97,66 @@ async function analyze(buf,d,onP){
   const kept=[];
   for(const c of cand){if(c.t<.3)continue;const L=kept[kept.length-1];
     if(L&&c.t-L.t<d.gap){if(c.s>L.s)kept[kept.length-1]=c}else kept.push(c)}
+  // 템포(0.1BPM 단위)·위상 추정 → 박자 격자에 맞추기
+  let bpm=120,phase=0,conf=0;
+  for(let B=75;B<=165;B+=.1){const P=60/B;let re=0,im=0,sw=0;for(const c of kept){const a=6.2831853*c.t/P;re+=c.s*Math.cos(a);im+=c.s*Math.sin(a);sw+=c.s}const m=Math.hypot(re,im)/(sw||1);if(m>conf){conf=m;bpm=B;phase=((Math.atan2(im,re)/6.2831853)*P+P)%P}}
+  const period=60/bpm,sub=period/d.sub;
+  for(const c of kept){const q=phase+Math.round((c.t-phase)/sub)*sub;if(Math.abs(c.t-q)<d.tol)c.t=q;else if(conf>.35)c.drop=1}
+  kept.sort((a,b)=>a.t-b.t);const k2=[];
+  for(const c of kept){if(c.drop||c.t<.3)continue;const L=k2[k2.length-1];if(L&&c.t-L.t<d.gap*.8){if(c.s>L.s)k2[k2.length-1]=c}else k2.push(c)}
+  kept.length=0;kept.push(...k2);
+  // 롱노트: 음이 이어지는 구간
+  const mL=lo.reduce((a,b)=>a+b,0)/nb+1e-9,mH=hi.reduce((a,b)=>a+b,0)/nb+1e-9,pe=new Float64Array(nb+1);
+  for(let b=0;b<nb;b++)pe[b+1]=pe[b]+lo[b]/mL+hi[b]/mH;
+  kept.forEach((c,i)=>{const nx=kept[i+1]?kept[i+1].t:c.t+9,len=Math.min(nx-c.t-.15,period*2,2);
+    if(len<.4||Math.random()>d.hold)return;
+    const b0=Math.floor(c.t*sr/hop),b1=Math.min(nb,b0+Math.floor(len*sr/hop));if(b1-b0<12)return;
+    let pk=0;for(let b=b0;b<b0+4;b++)pk=Math.max(pk,pe[b+1]-pe[b]);
+    if((pe[b1]-pe[b0+6])/(b1-b0-6)<pk*.4)return;
+    let e=c.t+len;if(conf>.35){const q=phase+Math.floor((e-phase)/sub)*sub;if(q>c.t+.3)e=q}c.e=e});
   // 레인 배치
   let seed=kept.length*7919+13;const rnd=()=>{seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296};
   const notes=[];let last=-1;
   for(const c of kept){let pool=c.low?[1,2]:[0,3];if(rnd()<.25)pool=[0,1,2,3];
     let l=pool[Math.floor(rnd()*pool.length)];if(l===last&&rnd()<.7)l=pool[(pool.indexOf(l)+1)%pool.length];last=l;
-    notes.push({t:c.t,l});
+    notes.push({t:c.t,l,e:c.e||0});
     if(c.nl>d.ch&&c.nh>d.ch&&3-l!==l)notes.push({t:c.t,l:3-l})}
   return{notes,bpm,period,phase};
 }
 
 // ---------- 게임 ----------
-let buf,chart,startT,src,playing=false,lanes,idx,flash=[0,0,0,0],parts=[],rings=[],jd={life:0},combo,maxC,cnt,score,lastScore=-1;
-const JW={p:.05,g:.095,o:.14},JC={p:'#ffffff',g:'#4dd2ff',o:'#ffd24d',m:'#ff5fa2'},JT={p:'PERFECT',g:'GREAT',o:'GOOD',m:'MISS'};
+let buf,chart,startT,src,playing=false,lanes,idx,flash=[0,0,0,0],parts=[],rings=[],jd={life:0},combo,maxC,cnt,score,lastScore=-1,holdAct=[null,null,null,null];
+const JW={p:.05,g:.095,o:.16},JC={p:'#ffffff',g:'#4dd2ff',o:'#ffd24d',m:'#ff5fa2'},JT={p:'PERFECT',g:'GREAT',o:'GOOD',m:'MISS'};
 const geo=()=>{const lw=Math.min(W*.15,120);return{lw,x0:(W-lw*4)/2,hy:H*.8}};
 function begin(){
   lanes=[[],[],[],[]];idx=[0,0,0,0];for(const n of chart.notes)lanes[n.l].push(n);
-  parts=[];rings=[];combo=0;maxC=0;score=0;lastScore=-1;cnt={p:0,g:0,o:0,m:0};jd={life:0};
+  parts=[];rings=[];holdAct=[null,null,null,null];combo=0;maxC=0;score=0;lastScore=-1;cnt={p:0,g:0,o:0,m:0};jd={life:0};
   src=ctx.createBufferSource();src.buffer=buf;src.connect(ctx.destination);
   startT=ctx.currentTime+2.4;src.start(startT);playing=true;show('game');requestAnimationFrame(loop);
 }
 function judge(l,k){
   const{lw,x0,hy}=geo();cnt[k]++;
   if(k==='m'){combo=0}else{combo++;maxC=Math.max(maxC,combo);score+={p:1000,g:700,o:400}[k]+Math.min(combo,50)*10;
-    tick(k);buzz();flash[l]=1;const x=x0+l*lw+lw/2,N=k==='p'?24:12;
+    tick(k);buzz();flash[l]=1;const x=x0+l*lw+lw/2,N=k==='p'?16:8;
     for(let i=0;i<N;i++){const an=-Math.PI*(.1+.8*Math.random()),v=140+Math.random()*320;parts.push({x,y:hy,vx:Math.cos(an)*v,vy:Math.sin(an)*v,life:1,l,s:2+Math.random()*3})}
     rings.push({x,y:hy,r:10,life:1,l});
     if(combo%50===0)for(let i=0;i<60;i++){const an=Math.random()*Math.PI*2,v=100+Math.random()*420;parts.push({x:W/2,y:H*.35,vx:Math.cos(an)*v,vy:Math.sin(an)*v,life:1,l:i%4,s:2+Math.random()*3})}}
   jd={t:JT[k],c:JC[k],life:1,pop:1};
 }
 function tick(k){if(!sfxOn||!ctx)return;const t=ctx.currentTime,o=ctx.createOscillator(),gn=ctx.createGain();o.type='sine';o.frequency.value=k==='p'?1800:1300;gn.gain.setValueAtTime(.1,t);gn.gain.exponentialRampToValueAtTime(.001,t+.05);o.connect(gn).connect(ctx.destination);o.start(t);o.stop(t+.06)}
-function buzz(){if(!vibOn)return;if(navigator.vibrate)navigator.vibrate(10);else{const h=$('hap');h&&h.click()}}
+function hapClick(){const h=$('hap');h&&h.click()}
+function buzz(){if(!vibOn)return;if(navigator.vibrate)navigator.vibrate(10);else{hapQ=true;hapClick()}}
+function holdDone(l,n){score+=500;const{lw,x0,hy}=geo(),x=x0+l*lw+lw/2;for(let i=0;i<14;i++)parts.push({x,y:hy,vx:(Math.random()-.5)*300,vy:-100-Math.random()*300,life:1,l,s:3});rings.push({x,y:hy,r:10,life:1,l});tick('p')}
+function release(l){const n=holdAct[l];if(!n||!playing)return;holdAct[l]=null;const t=ctx.currentTime-startT-offset/1000;if(t<n.e-.12){combo=0;jd={t:'BREAK',c:JC.m,life:1,pop:0}}else holdDone(l,n)}
 function press(l,ts){
   if(!playing)return;const lag=ts?Math.max(0,Math.min(.2,(performance.now()-ts)/1000)):0,t=ctx.currentTime-lag-startT-offset/1000;
   const n=lanes[l][idx[l]];if(!n)return;const d=Math.abs(n.t-t);
-  if(d>JW.o)return;idx[l]++;judge(l,d<=JW.p?'p':d<=JW.g?'g':'o');
+  if(d>JW.o)return;idx[l]++;judge(l,d<=JW.p?'p':d<=JW.g?'g':'o');if(n.e)holdAct[l]=n;
 }
 function loop(){
   if(!playing)return;const t=ctx.currentTime-startT;
   for(let l=0;l<4;l++){const a=lanes[l];while(a[idx[l]]&&a[idx[l]].t<t-offset/1000-JW.o){idx[l]++;judge(l,'m')}}
+  for(let l=0;l<4;l++){const n=holdAct[l];if(n&&t-offset/1000>=n.e){holdAct[l]=null;holdDone(l,n)}}
   draw(t);
   if(t>buf.duration+.8)return finish();
   requestAnimationFrame(loop);
@@ -156,11 +174,12 @@ function draw(t){
   const hg=g.createLinearGradient(0,hy-14,0,hy+14);hg.addColorStop(0,'rgba(255,255,255,0)');hg.addColorStop(.5,`rgba(255,255,255,${.7+.3*pulse})`);hg.addColorStop(1,'rgba(255,255,255,0)');g.fillStyle=hg;g.fillRect(x0,hy-14,lw*4,28);
   for(let l=0;l<4;l++){const a=lanes[l],x=x0+l*lw;
     for(let i=idx[l];i<a.length;i++){const y=hy-(a[i].t-t)*speed;if(y<-30)break;if(y>H+30)continue;
-      g.fillStyle=rgba(l,.28);g.fillRect(x+2,y-17,lw-4,34);g.fillStyle=rgba(l,.95);g.fillRect(x+7,y-9,lw-14,18);g.fillStyle='rgba(255,255,255,.9)';g.fillRect(x+11,y-4,lw-22,6)}}
+      if(a[i].e){const ty=hy-(a[i].e-t)*speed;g.fillStyle=rgba(l,.35);g.fillRect(x+10,ty,lw-20,y-ty)}g.fillStyle=rgba(l,.28);g.fillRect(x+2,y-17,lw-4,34);g.fillStyle=rgba(l,.95);g.fillRect(x+7,y-9,lw-14,18);g.fillStyle='rgba(255,255,255,.9)';g.fillRect(x+11,y-4,lw-22,6)}
+    const h=holdAct[l];if(h){const ty=Math.max(-20,hy-(h.e-t)*speed);g.fillStyle=rgba(l,.75);g.fillRect(x+8,ty,lw-16,hy-ty);g.fillStyle='rgba(255,255,255,.9)';g.fillRect(x+4,hy-10,lw-8,20);if(Math.random()<.6)parts.push({x:x+lw/2,y:hy,vx:(Math.random()-.5)*160,vy:-60-Math.random()*220,life:.8,l,s:3})}}
   const dt=.016;
   for(let i=parts.length-1;i>=0;i--){const p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=520*dt;p.life-=.03;if(p.life<=0){parts.splice(i,1);continue}
     g.fillStyle=rgba(p.l,p.life);g.fillRect(p.x-p.s/2,p.y-p.s/2,p.s,p.s)}
-  if(parts.length>400)parts.splice(0,parts.length-400);
+  if(parts.length>220)parts.splice(0,parts.length-220);
   for(let i=rings.length-1;i>=0;i--){const r=rings[i];r.r+=5;r.life-=.07;if(r.life<=0){rings.splice(i,1);continue}
     g.strokeStyle=rgba(r.l,r.life);g.lineWidth=3;g.beginPath();g.arc(r.x,r.y,r.r,0,7);g.stroke()}
   g.globalCompositeOperation='source-over';
@@ -186,11 +205,16 @@ $('rAgain').onclick=()=>{initCtx();begin()};
 
 // 입력
 const laneAt=x=>{const{lw,x0}=geo();return Math.max(0,Math.min(3,Math.floor((x-x0)/lw)))};
-cv.addEventListener('touchstart',e=>{e.preventDefault();for(const t of e.changedTouches)press(laneAt(t.clientX),e.timeStamp)},{passive:false});
-cv.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse')press(laneAt(e.clientX),e.timeStamp)});
-document.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
+const lx=t=>rot?t.clientY:t.clientX,tl={};let hapQ=false,ml=-1;
+cv.addEventListener('touchstart',e=>{e.preventDefault();for(const t of e.changedTouches){const l=laneAt(lx(t));tl[t.identifier]=l;press(l,e.timeStamp)}},{passive:false});
+const tend=e=>{for(const t of e.changedTouches){const l=tl[t.identifier];delete tl[t.identifier];if(l!==undefined)release(l)}if(hapQ){hapQ=false;hapClick()}};
+cv.addEventListener('touchend',tend);cv.addEventListener('touchcancel',tend);
+cv.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse'){ml=laneAt(lx(e));press(ml,e.timeStamp)}});
+addEventListener('pointerup',e=>{if(e.pointerType==='mouse'&&ml>=0){release(ml);ml=-1}});
 document.addEventListener('gesturestart',e=>e.preventDefault());
-const KEYS={d:0,f:1,j:2,k:3};addEventListener('keydown',e=>{if(!e.repeat&&KEYS[e.key]!==undefined)press(KEYS[e.key],e.timeStamp)});
+const KEYS={d:0,f:1,j:2,k:3};
+addEventListener('keydown',e=>{if(!e.repeat&&KEYS[e.key]!==undefined)press(KEYS[e.key],e.timeStamp)});
+addEventListener('keyup',e=>{if(KEYS[e.key]!==undefined)release(KEYS[e.key])});
 
 // 파일 불러오기
 $('play').onclick=()=>{initCtx();$('file').click()};
