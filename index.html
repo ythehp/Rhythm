@@ -36,6 +36,7 @@ h1{font-size:clamp(26px,7vh,50px);letter-spacing:.22em;font-weight:900;backgroun
   <button class="play" id="play">▶</button>
   <div class="row" id="diffs"><button class="chip" data-d="easy">쉬움</button><button class="chip" data-d="normal">보통</button><button class="chip" data-d="hard">어려움</button></div>
   <div class="row"><button class="chip" id="cal">🥁 타이밍 보정</button><span class="sub" id="offTxt"></span></div>
+  <div class="row"><button class="chip" id="sfx"></button><button class="chip" id="vib"></button></div>
   <div class="sub">▶ 를 눌러 내 음악 파일(mp3, wav 등)을 선택하세요</div>
 </div>
 <div class="screen" id="loading"><div class="big" id="lt">분석 중...</div><div class="sub" id="lsub"></div></div>
@@ -51,21 +52,24 @@ h1{font-size:clamp(26px,7vh,50px);letter-spacing:.22em;font-weight:900;backgroun
   <div class="row"><button class="chip sel" id="rAgain">다시하기</button><button class="chip" id="rHome">처음으로</button></div>
 </div>
 <div id="rot">📱↻<br>폰을 가로로 돌려주세요</div>
+<label id="hap" style="position:fixed;left:-99px;top:0;opacity:0;pointer-events:none"><input type="checkbox" switch></label>
 <input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac" style="display:none">
 
 <script>
 const $=id=>document.getElementById(id),cv=$('c'),g=cv.getContext('2d');
-let W,H;
-function resize(){const r=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;cv.width=W*r;cv.height=H*r;g.setTransform(r,0,0,r,0,0)}
+let W,H,bgG=null;
+function resize(){const r=Math.min(devicePixelRatio||1,1.5);W=innerWidth;H=innerHeight;cv.width=W*r;cv.height=H*r;g.setTransform(r,0,0,r,0,0);bgG=null}
 addEventListener('resize',resize);resize();
 const RGB=[[77,210,255],[184,107,255],[255,95,162],[255,210,77]],rgba=(l,a)=>`rgba(${RGB[l]},${a})`;
 const DIFF={easy:{k:1.9,gap:.36,ch:99},normal:{k:1.5,gap:.24,ch:2.4},hard:{k:1.2,gap:.15,ch:1.7}};
-let diff=localStorage.getItem('rg-diff')||'normal',offset=+localStorage.getItem('rg-off')||0;
+let diff=localStorage.getItem('rg-diff')||'normal',offset=+localStorage.getItem('rg-off')||0,sfxOn=localStorage.getItem('rg-sfx')!=='0',vibOn=localStorage.getItem('rg-vib')!=='0';
 let ctx=null;
 function initCtx(){if(!ctx)ctx=new(window.AudioContext||window.webkitAudioContext)();if(ctx.state!=='running')ctx.resume()}
 const show=id=>{document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('on',s.id===id));$('hud').classList.toggle('on',id==='game')};
-function ui(){document.querySelectorAll('#diffs .chip').forEach(b=>b.classList.toggle('sel',b.dataset.d===diff));$('offTxt').textContent='보정값 '+(offset>=0?'+':'')+Math.round(offset)+'ms'}
-document.querySelectorAll('#diffs .chip').forEach(b=>b.onclick=()=>{diff=b.dataset.d;localStorage.setItem('rg-diff',diff);ui()});ui();
+function ui(){document.querySelectorAll('#diffs .chip').forEach(b=>b.classList.toggle('sel',b.dataset.d===diff));$('offTxt').textContent='보정값 '+(offset>=0?'+':'')+Math.round(offset)+'ms';$('sfx').textContent='🔊 효과음 '+(sfxOn?'ON':'OFF');$('vib').textContent='📳 진동 '+(vibOn?'ON':'OFF')}
+document.querySelectorAll('#diffs .chip').forEach(b=>b.onclick=()=>{diff=b.dataset.d;localStorage.setItem('rg-diff',diff);ui()});
+$('sfx').onclick=()=>{sfxOn=!sfxOn;localStorage.setItem('rg-sfx',sfxOn?'1':'0');ui()};
+$('vib').onclick=()=>{vibOn=!vibOn;localStorage.setItem('rg-vib',vibOn?'1':'0');ui()};ui();
 
 // ---------- 곡 분석 ----------
 async function analyze(buf,d,onP){
@@ -119,14 +123,16 @@ function begin(){
 function judge(l,k){
   const{lw,x0,hy}=geo();cnt[k]++;
   if(k==='m'){combo=0}else{combo++;maxC=Math.max(maxC,combo);score+={p:1000,g:700,o:400}[k]+Math.min(combo,50)*10;
-    flash[l]=1;const x=x0+l*lw+lw/2,N=k==='p'?24:12;
+    tick(k);buzz();flash[l]=1;const x=x0+l*lw+lw/2,N=k==='p'?24:12;
     for(let i=0;i<N;i++){const an=-Math.PI*(.1+.8*Math.random()),v=140+Math.random()*320;parts.push({x,y:hy,vx:Math.cos(an)*v,vy:Math.sin(an)*v,life:1,l,s:2+Math.random()*3})}
     rings.push({x,y:hy,r:10,life:1,l});
     if(combo%50===0)for(let i=0;i<60;i++){const an=Math.random()*Math.PI*2,v=100+Math.random()*420;parts.push({x:W/2,y:H*.35,vx:Math.cos(an)*v,vy:Math.sin(an)*v,life:1,l:i%4,s:2+Math.random()*3})}}
   jd={t:JT[k],c:JC[k],life:1,pop:1};
 }
-function press(l){
-  if(!playing)return;const t=ctx.currentTime-startT-offset/1000;
+function tick(k){if(!sfxOn||!ctx)return;const t=ctx.currentTime,o=ctx.createOscillator(),gn=ctx.createGain();o.type='sine';o.frequency.value=k==='p'?1800:1300;gn.gain.setValueAtTime(.1,t);gn.gain.exponentialRampToValueAtTime(.001,t+.05);o.connect(gn).connect(ctx.destination);o.start(t);o.stop(t+.06)}
+function buzz(){if(!vibOn)return;if(navigator.vibrate)navigator.vibrate(10);else{const h=$('hap');h&&h.click()}}
+function press(l,ts){
+  if(!playing)return;const lag=ts?Math.max(0,Math.min(.2,(performance.now()-ts)/1000)):0,t=ctx.currentTime-lag-startT-offset/1000;
   const n=lanes[l][idx[l]];if(!n)return;const d=Math.abs(n.t-t);
   if(d>JW.o)return;idx[l]++;judge(l,d<=JW.p?'p':d<=JW.g?'g':'o');
 }
@@ -140,7 +146,7 @@ function loop(){
 let dt0=0;
 function draw(t){
   const{lw,x0,hy}=geo(),speed=hy/1.3;
-  const bg=g.createLinearGradient(0,0,0,H);bg.addColorStop(0,'#0a0820');bg.addColorStop(1,'#1a0a34');g.fillStyle=bg;g.fillRect(0,0,W,H);
+  if(!bgG){bgG=g.createLinearGradient(0,0,0,H);bgG.addColorStop(0,'#0a0820');bgG.addColorStop(1,'#1a0a34')}g.fillStyle=bgG;g.fillRect(0,0,W,H);
   const sp=chart.period,pulse=Math.pow(1-(((t-chart.phase)%sp+sp)%sp)/sp,3);
   const rg=g.createRadialGradient(W/2,H*.5,0,W/2,H*.5,H*.9);rg.addColorStop(0,`rgba(140,80,255,${.1+.17*pulse})`);rg.addColorStop(1,'rgba(0,0,0,0)');g.fillStyle=rg;g.fillRect(0,0,W,H);
   for(let l=0;l<4;l++){const x=x0+l*lw;g.fillStyle='rgba(255,255,255,.04)';g.fillRect(x,0,lw,H);
@@ -179,8 +185,12 @@ $('rHome').onclick=()=>show('title');
 $('rAgain').onclick=()=>{initCtx();begin()};
 
 // 입력
-cv.addEventListener('pointerdown',e=>{const{lw,x0}=geo();press(Math.max(0,Math.min(3,Math.floor((e.clientX-x0)/lw))))});
-const KEYS={d:0,f:1,j:2,k:3};addEventListener('keydown',e=>{if(!e.repeat&&KEYS[e.key]!==undefined)press(KEYS[e.key])});
+const laneAt=x=>{const{lw,x0}=geo();return Math.max(0,Math.min(3,Math.floor((x-x0)/lw)))};
+cv.addEventListener('touchstart',e=>{e.preventDefault();for(const t of e.changedTouches)press(laneAt(t.clientX),e.timeStamp)},{passive:false});
+cv.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse')press(laneAt(e.clientX),e.timeStamp)});
+document.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
+document.addEventListener('gesturestart',e=>e.preventDefault());
+const KEYS={d:0,f:1,j:2,k:3};addEventListener('keydown',e=>{if(!e.repeat&&KEYS[e.key]!==undefined)press(KEYS[e.key],e.timeStamp)});
 
 // 파일 불러오기
 $('play').onclick=()=>{initCtx();$('file').click()};
@@ -215,12 +225,14 @@ function calEnd(){
 }
 let calVal=0;
 $('cal').onclick=calStart;
-$('calib').addEventListener('pointerdown',e=>{
-  if(!cOn||e.target.closest('button'))return;const now=ctx.currentTime;
+function calTap(e){
+  if(!cOn||e.target.closest('button'))return;const now=ctx.currentTime-Math.max(0,Math.min(.2,(performance.now()-e.timeStamp)/1000));
   let bi=0,bd=9;cBeats.forEach((b,i)=>{const d=Math.abs(now-b);if(d<bd){bd=d;bi=i}});
   if(bi<3||bd>.3)return;cDiffs.push(now-cBeats[bi]);$('cText').textContent=`${cDiffs.length} / 8`;
   if(cDiffs.length>=8)calEnd();
-});
+}
+$('calib').addEventListener('touchstart',e=>{if(!e.target.closest('button'))e.preventDefault();calTap(e)},{passive:false});
+$('calib').addEventListener('pointerdown',e=>{if(e.pointerType==='mouse')calTap(e)});
 $('cDone').onclick=()=>{offset=calVal;localStorage.setItem('rg-off',offset);ui();show('title')};
 $('cRetry').onclick=calStart;
 $('cBack').onclick=()=>{cOn=false;show('title')};
