@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>RHYTHM</title><link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0a0820"><meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="RHYTHM">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;background:#0a0820;color:#fff;font-family:-apple-system,BlinkMacSystemFont,sans-serif;overflow:hidden;overscroll-behavior:none;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+canvas{position:fixed;inset:0;width:100%;height:100%}
+.screen{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+.screen.on{display:flex}
+#title{background:radial-gradient(circle at 50% 45%,#1d1050,#0a0820 70%)}
+#loading,#calib,#result{background:rgba(10,8,32,.96)}
+h1{font-size:clamp(26px,7vh,50px);letter-spacing:.22em;font-weight:900;background:linear-gradient(90deg,#4dd2ff,#b86bff,#ff5fa2,#ffd24d);-webkit-background-clip:text;background-clip:text;color:transparent}
+.play{width:min(27vh,150px);height:min(27vh,150px);border-radius:50%;border:none;font-size:min(11vh,54px);padding-left:.1em;color:#fff;background:radial-gradient(circle at 35% 30%,#ff8ac8,#6a35ff);box-shadow:0 0 44px rgba(160,90,255,.7);animation:pulse 1.5s ease-in-out infinite}
+@keyframes pulse{50%{transform:scale(1.07);box-shadow:0 0 80px rgba(184,107,255,1)}}
+.row{display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap}
+.chip{padding:9px 18px;border-radius:20px;border:1px solid #ffffff33;background:#ffffff10;color:#fff;font-size:14px;font-family:inherit}
+.chip.sel{background:#6a35ff;border-color:#b86bff}
+.sub{font-size:13px;color:#a09ac4;line-height:1.5}
+.big{font-size:clamp(22px,6vh,40px);font-weight:800}
+#rot{position:fixed;inset:0;z-index:99;background:#0a0820;display:none;align-items:center;justify-content:center;font-size:20px;line-height:1.6;text-align:center;padding:30px}
+@media(orientation:portrait){#rot{display:flex}}
+#hud{position:fixed;top:calc(8px + env(safe-area-inset-top));left:calc(12px + env(safe-area-inset-left));right:calc(12px + env(safe-area-inset-right));display:none;justify-content:space-between;align-items:center;pointer-events:none;font-weight:800;font-size:20px;font-variant-numeric:tabular-nums}
+#hud.on{display:flex}
+#quit{pointer-events:auto;background:#ffffff1c;border:none;color:#fff;width:34px;height:34px;border-radius:50%;font-size:14px}
+#grade{font-size:clamp(50px,18vh,100px);font-weight:900;background:linear-gradient(90deg,#4dd2ff,#ff5fa2);-webkit-background-clip:text;background-clip:text;color:transparent;line-height:1}
+</style></head><body>
+<canvas id="c"></canvas>
+<div id="hud"><button id="quit">✕</button><div id="score">0</div></div>
+
+<div class="screen on" id="title">
+  <h1>RHYTHM</h1>
+  <button class="play" id="play">▶</button>
+  <div class="row" id="diffs"><button class="chip" data-d="easy">쉬움</button><button class="chip" data-d="normal">보통</button><button class="chip" data-d="hard">어려움</button></div>
+  <div class="row"><button class="chip" id="cal">🥁 타이밍 보정</button><span class="sub" id="offTxt"></span></div>
+  <div class="sub">▶ 를 눌러 내 음악 파일(mp3, wav 등)을 선택하세요</div>
+</div>
+<div class="screen" id="loading"><div class="big" id="lt">분석 중...</div><div class="sub" id="lsub"></div></div>
+<div class="screen" id="calib">
+  <div class="big">타이밍 보정</div>
+  <div class="sub">드럼 소리에 맞춰 화면을 탭하세요<br>평균 오차를 계산해서 판정에 반영해요</div>
+  <div class="big" id="cText">준비...</div>
+  <div class="row" id="cBtns" style="display:none"><button class="chip sel" id="cDone">완료</button><button class="chip" id="cRetry">다시</button></div>
+  <button class="chip" id="cBack">닫기</button>
+</div>
+<div class="screen" id="result">
+  <div id="grade">S</div><div class="big" id="rScore">0</div><div class="sub" id="rDet"></div>
+  <div class="row"><button class="chip sel" id="rAgain">다시하기</button><button class="chip" id="rHome">처음으로</button></div>
+</div>
+<div id="rot">📱↻<br>폰을 가로로 돌려주세요</div>
+<input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac" style="display:none">
+
+<script>
+const $=id=>document.getElementById(id),cv=$('c'),g=cv.getContext('2d');
+let W,H;
+function resize(){const r=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;cv.width=W*r;cv.height=H*r;g.setTransform(r,0,0,r,0,0)}
+addEventListener('resize',resize);resize();
+const RGB=[[77,210,255],[184,107,255],[255,95,162],[255,210,77]],rgba=(l,a)=>`rgba(${RGB[l]},${a})`;
+const DIFF={easy:{k:1.9,gap:.36,ch:99},normal:{k:1.5,gap:.24,ch:2.4},hard:{k:1.2,gap:.15,ch:1.7}};
+let diff=localStorage.getItem('rg-diff')||'normal',offset=+localStorage.getItem('rg-off')||0;
+let ctx=null;
+function initCtx(){if(!ctx)ctx=new(window.AudioContext||window.webkitAudioContext)();if(ctx.state!=='running')ctx.resume()}
+const show=id=>{document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('on',s.id===id));$('hud').classList.toggle('on',id==='game')};
+function ui(){document.querySelectorAll('#diffs .chip').forEach(b=>b.classList.toggle('sel',b.dataset.d===diff));$('offTxt').textContent='보정값 '+(offset>=0?'+':'')+Math.round(offset)+'ms'}
+document.querySelectorAll('#diffs .chip').forEach(b=>b.onclick=()=>{diff=b.dataset.d;localStorage.setItem('rg-diff',diff);ui()});ui();
+
+// ---------- 곡 분석 ----------
+async function analyze(buf,d,onP){
+  const sr=buf.sampleRate,n=buf.length,ch=buf.numberOfChannels,hop=512,nb=Math.floor(n/hop);
+  const mono=new Float32Array(n);
+  for(let c=0;c<ch;c++){const x=buf.getChannelData(c);for(let i=0;i<n;i++)mono[i]+=x[i]/ch}
+  const lo=new Float32Array(nb),hi=new Float32Array(nb);
+  let lp=0,px=0;const a=1-Math.exp(-2*Math.PI*180/sr);
+  for(let b=0;b<nb;b++){let el=0,eh=0;const s=b*hop;
+    for(let i=0;i<hop;i++){const x=mono[s+i];lp+=a*(x-lp);const h=x-px;px=x;el+=lp*lp;eh+=h*h}
+    lo[b]=Math.sqrt(el/hop);hi[b]=Math.sqrt(eh/hop);
+    if(b%600===0){onP(b/nb);await new Promise(r=>setTimeout(r))}}
+  const fl=new Float32Array(nb),fh=new Float32Array(nb);let ml=0,mh=0;
+  for(let b=1;b<nb;b++){fl[b]=Math.max(0,lo[b]-lo[b-1]);fh[b]=Math.max(0,hi[b]-hi[b-1]);ml+=fl[b];mh+=fh[b]}
+  ml=ml/nb+1e-9;mh=mh/nb+1e-9;
+  const nl=new Float32Array(nb),nh=new Float32Array(nb),env=new Float32Array(nb);
+  for(let b=0;b<nb;b++){nl[b]=fl[b]/ml;nh[b]=fh[b]/mh;env[b]=nl[b]+nh[b]*.8}
+  // BPM / 박자 위상
+  let bL=0,bS=-1;const minL=Math.round(sr/hop/3),maxL=Math.round(sr/hop);
+  for(let L=minL;L<=maxL;L++){let s=0;for(let b=0;b+L<nb;b++)s+=env[b]*env[b+L];s/=nb-L;if(s>bS){bS=s;bL=L}}
+  let bp=0,bs=-1;for(let p=0;p<bL;p++){let s=0;for(let b=p;b<nb;b+=bL)s+=env[b];if(s>bs){bs=s;bp=p}}
+  const bpm=60*sr/hop/bL,period=bL*hop/sr,phase=bp*hop/sr;
+  // 온셋 피크
+  const pre=new Float64Array(nb+1);for(let b=0;b<nb;b++)pre[b+1]=pre[b]+env[b];
+  const cand=[];
+  for(let b=2;b<nb-2;b++){const a0=Math.max(0,b-43),a1=Math.min(nb,b+43),m=(pre[a1]-pre[a0])/(a1-a0);
+    if(env[b]>m*d.k+.6&&env[b]>=env[b-1]&&env[b]>env[b+1])cand.push({t:b*hop/sr,s:env[b],nl:nl[b],nh:nh[b],low:nl[b]>nh[b]})}
+  const kept=[];
+  for(const c of cand){if(c.t<.3)continue;const L=kept[kept.length-1];
+    if(L&&c.t-L.t<d.gap){if(c.s>L.s)kept[kept.length-1]=c}else kept.push(c)}
+  // 레인 배치
+  let seed=kept.length*7919+13;const rnd=()=>{seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296};
+  const notes=[];let last=-1;
+  for(const c of kept){let pool=c.low?[1,2]:[0,3];if(rnd()<.25)pool=[0,1,2,3];
+    let l=pool[Math.floor(rnd()*pool.length)];if(l===last&&rnd()<.7)l=pool[(pool.indexOf(l)+1)%pool.length];last=l;
+    notes.push({t:c.t,l});
+    if(c.nl>d.ch&&c.nh>d.ch&&3-l!==l)notes.push({t:c.t,l:3-l})}
+  return{notes,bpm,period,phase};
+}
+
+// ---------- 게임 ----------
+let buf,chart,startT,src,playing=false,lanes,idx,flash=[0,0,0,0],parts=[],rings=[],jd={life:0},combo,maxC,cnt,score,lastScore=-1;
+const JW={p:.05,g:.095,o:.14},JC={p:'#ffffff',g:'#4dd2ff',o:'#ffd24d',m:'#ff5fa2'},JT={p:'PERFECT',g:'GREAT',o:'GOOD',m:'MISS'};
+const geo=()=>{const lw=Math.min(W*.15,120);return{lw,x0:(W-lw*4)/2,hy:H*.8}};
+function begin(){
+  lanes=[[],[],[],[]];idx=[0,0,0,0];for(const n of chart.notes)lanes[n.l].push(n);
+  parts=[];rings=[];combo=0;maxC=0;score=0;lastScore=-1;cnt={p:0,g:0,o:0,m:0};jd={life:0};
+  src=ctx.createBufferSource();src.buffer=buf;src.connect(ctx.destination);
+  startT=ctx.currentTime+2.4;src.start(startT);playing=true;show('game');requestAnimationFrame(loop);
+}
+function judge(l,k){
+  const{lw,x0,hy}=geo();cnt[k]++;
+  if(k==='m'){combo=0}else{combo++;maxC=Math.max(maxC,combo);score+={p:1000,g:700,o:400}[k]+Math.min(combo,50)*10;
+    flash[l]=1;const x=x0+l*lw+lw/2,N=k==='p'?24:12;
+    for(let i=0;i<N;i++){const an=-Math.PI*(.1+.8*Math.random()),v=140+Math.random()*320;parts.push({x,y:hy,vx:Math.cos(an)*v,vy:Math.sin(an)*v,life:1,l,s:2+Math.random()*3})}
+    rings.push({x,y:hy,r:10,life:1,l});
+    if(combo%50===0)for(let i=0;i<60;i++){const an=Math.random()*Math.PI*2,v=100+Math.random()*420;parts.push({x:W/2,y:H*.35,vx:Math.cos(an)*v,vy:Math.sin(an)*v,life:1,l:i%4,s:2+Math.random()*3})}}
+  jd={t:JT[k],c:JC[k],life:1,pop:1};
+}
+function press(l){
+  if(!playing)return;const t=ctx.currentTime-startT-offset/1000;
+  const n=lanes[l][idx[l]];if(!n)return;const d=Math.abs(n.t-t);
+  if(d>JW.o)return;idx[l]++;judge(l,d<=JW.p?'p':d<=JW.g?'g':'o');
+}
+function loop(){
+  if(!playing)return;const t=ctx.currentTime-startT;
+  for(let l=0;l<4;l++){const a=lanes[l];while(a[idx[l]]&&a[idx[l]].t<t-offset/1000-JW.o){idx[l]++;judge(l,'m')}}
+  draw(t);
+  if(t>buf.duration+.8)return finish();
+  requestAnimationFrame(loop);
+}
+let dt0=0;
+function draw(t){
+  const{lw,x0,hy}=geo(),speed=hy/1.3;
+  const bg=g.createLinearGradient(0,0,0,H);bg.addColorStop(0,'#0a0820');bg.addColorStop(1,'#1a0a34');g.fillStyle=bg;g.fillRect(0,0,W,H);
+  const sp=chart.period,pulse=Math.pow(1-(((t-chart.phase)%sp+sp)%sp)/sp,3);
+  const rg=g.createRadialGradient(W/2,H*.5,0,W/2,H*.5,H*.9);rg.addColorStop(0,`rgba(140,80,255,${.1+.17*pulse})`);rg.addColorStop(1,'rgba(0,0,0,0)');g.fillStyle=rg;g.fillRect(0,0,W,H);
+  for(let l=0;l<4;l++){const x=x0+l*lw;g.fillStyle='rgba(255,255,255,.04)';g.fillRect(x,0,lw,H);
+    if(flash[l]>0){const f=g.createLinearGradient(0,hy,0,hy-H*.75);f.addColorStop(0,rgba(l,.6*flash[l]));f.addColorStop(1,rgba(l,0));g.fillStyle=f;g.fillRect(x,0,lw,hy);flash[l]=Math.max(0,flash[l]-.07)}}
+  g.strokeStyle='rgba(255,255,255,.14)';g.lineWidth=1;for(let i=0;i<=4;i++){g.beginPath();g.moveTo(x0+i*lw,0);g.lineTo(x0+i*lw,H);g.stroke()}
+  g.globalCompositeOperation='lighter';
+  const hg=g.createLinearGradient(0,hy-14,0,hy+14);hg.addColorStop(0,'rgba(255,255,255,0)');hg.addColorStop(.5,`rgba(255,255,255,${.7+.3*pulse})`);hg.addColorStop(1,'rgba(255,255,255,0)');g.fillStyle=hg;g.fillRect(x0,hy-14,lw*4,28);
+  for(let l=0;l<4;l++){const a=lanes[l],x=x0+l*lw;
+    for(let i=idx[l];i<a.length;i++){const y=hy-(a[i].t-t)*speed;if(y<-30)break;if(y>H+30)continue;
+      g.fillStyle=rgba(l,.28);g.fillRect(x+2,y-17,lw-4,34);g.fillStyle=rgba(l,.95);g.fillRect(x+7,y-9,lw-14,18);g.fillStyle='rgba(255,255,255,.9)';g.fillRect(x+11,y-4,lw-22,6)}}
+  const dt=.016;
+  for(let i=parts.length-1;i>=0;i--){const p=parts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=520*dt;p.life-=.03;if(p.life<=0){parts.splice(i,1);continue}
+    g.fillStyle=rgba(p.l,p.life);g.fillRect(p.x-p.s/2,p.y-p.s/2,p.s,p.s)}
+  if(parts.length>400)parts.splice(0,parts.length-400);
+  for(let i=rings.length-1;i>=0;i--){const r=rings[i];r.r+=5;r.life-=.07;if(r.life<=0){rings.splice(i,1);continue}
+    g.strokeStyle=rgba(r.l,r.life);g.lineWidth=3;g.beginPath();g.arc(r.x,r.y,r.r,0,7);g.stroke()}
+  g.globalCompositeOperation='source-over';
+  g.textAlign='center';g.textBaseline='middle';
+  if(combo>1){const s=1+.25*Math.max(0,jd.pop||0);g.font=`900 ${Math.round(H*.13*s)}px -apple-system,sans-serif`;g.fillStyle='rgba(255,255,255,.9)';g.fillText(combo,W/2,H*.3);g.font=`700 ${Math.round(H*.04)}px -apple-system,sans-serif`;g.fillStyle='#b9a9ff';g.fillText('COMBO',W/2,H*.3+H*.09)}
+  if(jd.life>0){g.globalAlpha=Math.min(1,jd.life*1.6);g.font=`900 ${Math.round(H*.07)}px -apple-system,sans-serif`;g.fillStyle=jd.c;g.fillText(jd.t,W/2,hy-H*.2-(1-jd.life)*14);g.globalAlpha=1;jd.life-=.04;jd.pop=Math.max(0,(jd.pop||0)-.12)}
+  if(t<0){g.font=`900 ${Math.round(H*.2)}px -apple-system,sans-serif`;g.fillStyle='rgba(255,255,255,.85)';g.fillText(Math.ceil(-t-.4)>0?Math.ceil(-t-.4):'GO',W/2,H*.45);g.font=`700 ${Math.round(H*.045)}px -apple-system,sans-serif`;g.fillStyle='#b9a9ff';g.fillText('BPM '+Math.round(chart.bpm),W/2,H*.62)}
+  g.fillStyle='rgba(184,107,255,.8)';g.fillRect(0,0,W*Math.max(0,Math.min(1,t/buf.duration)),3);
+  if(score!==lastScore){$('score').textContent=score.toLocaleString();lastScore=score}
+}
+function finish(){
+  playing=false;try{src.stop()}catch(e){}
+  const tot=cnt.p+cnt.g+cnt.o+cnt.m||1,acc=(cnt.p+cnt.g*.7+cnt.o*.4)/tot;
+  $('grade').textContent=acc>.95?'S':acc>.85?'A':acc>.7?'B':'C';
+  $('rScore').textContent=score.toLocaleString();
+  $('rDet').innerHTML=`정확도 ${(acc*100).toFixed(1)}% · 최대 콤보 ${maxC}<br>PERFECT ${cnt.p} · GREAT ${cnt.g} · GOOD ${cnt.o} · MISS ${cnt.m}`;
+  show('result');
+}
+function stop(){playing=false;try{src&&src.stop()}catch(e){}}
+$('quit').onclick=()=>{stop();show('title')};
+$('rHome').onclick=()=>show('title');
+$('rAgain').onclick=()=>{initCtx();begin()};
+
+// 입력
+cv.addEventListener('pointerdown',e=>{const{lw,x0}=geo();press(Math.max(0,Math.min(3,Math.floor((e.clientX-x0)/lw))))});
+const KEYS={d:0,f:1,j:2,k:3};addEventListener('keydown',e=>{if(!e.repeat&&KEYS[e.key]!==undefined)press(KEYS[e.key])});
+
+// 파일 불러오기
+$('play').onclick=()=>{initCtx();$('file').click()};
+$('file').onchange=async e=>{
+  const f=e.target.files[0];e.target.value='';if(!f)return;
+  show('loading');$('lt').textContent='분석 중... 0%';$('lsub').textContent=f.name;
+  try{
+    const ab=await f.arrayBuffer();
+    buf=await new Promise((res,rej)=>ctx.decodeAudioData(ab,res,rej));
+    chart=await analyze(buf,DIFF[diff],p=>$('lt').textContent='분석 중... '+Math.round(p*100)+'%');
+    if(chart.notes.length<10){alert('노트를 충분히 찾지 못했어요. 다른 곡이나 어려운 난이도로 시도해보세요.');show('title');return}
+    begin();
+  }catch(err){alert('이 파일은 불러오지 못했어요. mp3나 wav로 다시 시도해보세요.');show('title')}
+};
+
+// ---------- 타이밍 보정 ----------
+let cBeats=[],cDiffs=[],cOn=false,noiseBuf;
+function kick(t){const o=ctx.createOscillator(),gn=ctx.createGain();o.frequency.setValueAtTime(160,t);o.frequency.exponentialRampToValueAtTime(45,t+.12);gn.gain.setValueAtTime(.9,t);gn.gain.exponentialRampToValueAtTime(.001,t+.28);o.connect(gn).connect(ctx.destination);o.start(t);o.stop(t+.3)}
+function hat(t){if(!noiseBuf){noiseBuf=ctx.createBuffer(1,ctx.sampleRate*.1,ctx.sampleRate);const d=noiseBuf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1}
+  const s=ctx.createBufferSource(),f=ctx.createBiquadFilter(),gn=ctx.createGain();s.buffer=noiseBuf;f.type='highpass';f.frequency.value=7000;gn.gain.setValueAtTime(.25,t);gn.gain.exponentialRampToValueAtTime(.001,t+.07);s.connect(f).connect(gn).connect(ctx.destination);s.start(t)}
+function calStart(){
+  initCtx();show('calib');cOn=true;cDiffs=[];$('cBtns').style.display='none';$('cText').textContent='준비...';
+  const sp=60/90,st=ctx.currentTime+1.4;cBeats=[];
+  for(let i=0;i<20;i++){const bt=st+i*sp;cBeats.push(bt);kick(bt);hat(bt+sp/2)}
+  setTimeout(()=>{if(cOn&&cDiffs.length<8)calEnd()},(1.4+20*sp)*1000);
+}
+function calEnd(){
+  cOn=false;
+  if(cDiffs.length<4){$('cText').textContent='탭이 부족해요. 다시 해보세요';$('cBtns').style.display='flex';return}
+  const s=[...cDiffs].sort((a,b)=>a-b),m=s[Math.floor(s.length/2)]*1000;
+  calVal=Math.max(-300,Math.min(300,m));$('cText').textContent='보정값 '+(calVal>=0?'+':'')+Math.round(calVal)+'ms';$('cBtns').style.display='flex';
+}
+let calVal=0;
+$('cal').onclick=calStart;
+$('calib').addEventListener('pointerdown',e=>{
+  if(!cOn||e.target.closest('button'))return;const now=ctx.currentTime;
+  let bi=0,bd=9;cBeats.forEach((b,i)=>{const d=Math.abs(now-b);if(d<bd){bd=d;bi=i}});
+  if(bi<3||bd>.3)return;cDiffs.push(now-cBeats[bi]);$('cText').textContent=`${cDiffs.length} / 8`;
+  if(cDiffs.length>=8)calEnd();
+});
+$('cDone').onclick=()=>{offset=calVal;localStorage.setItem('rg-off',offset);ui();show('title')};
+$('cRetry').onclick=calStart;
+$('cBack').onclick=()=>{cOn=false;show('title')};
+
+try{screen.orientation.lock('landscape').catch(()=>{})}catch(e){}
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js');
+</script></body></html>
