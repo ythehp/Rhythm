@@ -25,9 +25,10 @@ h1{font-size:clamp(26px,7vh,50px);letter-spacing:.22em;font-weight:900;backgroun
 #root{position:fixed;left:0;top:0;overflow:hidden}
 .play{position:relative;z-index:2}.play::after{content:'';position:absolute;inset:-18px;border-radius:50%}
 #title{gap:8px}
-#hud{position:fixed;top:calc(8px + env(safe-area-inset-top));left:calc(12px + env(safe-area-inset-left));right:calc(12px + env(safe-area-inset-right));display:none;justify-content:space-between;align-items:center;pointer-events:none;font-weight:800;font-size:20px;font-variant-numeric:tabular-nums}
+@media(orientation:portrait){#rot{display:flex}}
+#hud{position:fixed;top:calc(20px + env(safe-area-inset-top));left:calc(12px + env(safe-area-inset-left));right:calc(12px + env(safe-area-inset-right));display:none;justify-content:space-between;align-items:center;pointer-events:none;font-weight:800;font-size:20px;font-variant-numeric:tabular-nums}
 #hud.on{display:flex}
-#quit{pointer-events:auto;background:#ffffff26;border:none;color:#fff;width:56px;height:56px;border-radius:50%;font-size:20px;margin:-10px;touch-action:manipulation}
+#quit{pointer-events:auto;background:#ffffff26;border:none;color:#fff;width:56px;height:56px;border-radius:50%;font-size:20px;margin:0;touch-action:manipulation}
 #grade{font-size:clamp(50px,18vh,100px);font-weight:900;background:linear-gradient(90deg,#4dd2ff,#ff5fa2);-webkit-background-clip:text;background-clip:text;color:transparent;line-height:1}
 </style></head><body>
 <div id="root"><canvas id="c"></canvas>
@@ -54,13 +55,14 @@ h1{font-size:clamp(26px,7vh,50px);letter-spacing:.22em;font-weight:900;backgroun
   <div class="row"><button class="chip sel" id="rAgain">다시하기</button><button class="chip" id="rHome">처음으로</button></div>
 </div>
 </div>
+<div id="rot">📱↻<br>폰을 가로로 돌려주세요</div>
 <label id="hap" style="position:fixed;left:-99px;top:0;opacity:0;pointer-events:none"><input type="checkbox" switch></label>
 <input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac" style="display:none">
 
 <script>
 const $=id=>document.getElementById(id),cv=$('c'),g=cv.getContext('2d');
 let W,H,bgG=null,rot=false;
-function resize(){const iw=innerWidth,ih=innerHeight,r=Math.min(devicePixelRatio||1,1.5),s=$('root').style;rot=ih>iw;W=rot?ih:iw;H=rot?iw:ih;s.width=W+'px';s.height=H+'px';s.transformOrigin='0 0';s.transform=rot?`translateX(${iw}px) rotate(90deg)`:'none';cv.width=W*r;cv.height=H*r;g.setTransform(r,0,0,r,0,0);bgG=null}
+function resize(){const iw=innerWidth,ih=innerHeight,r=Math.min(devicePixelRatio||1,1.5),s=$('root').style;rot=false;W=iw;H=ih;s.width=W+'px';s.height=H+'px';s.transformOrigin='0 0';s.transform=rot?`translateX(${iw}px) rotate(90deg)`:'none';cv.width=W*r;cv.height=H*r;g.setTransform(r,0,0,r,0,0);bgG=null}
 addEventListener('resize',resize);addEventListener('orientationchange',()=>setTimeout(resize,200));resize();
 const RGB=[[77,210,255],[184,107,255],[255,95,162],[255,210,77]],rgba=(l,a)=>`rgba(${RGB[l]},${a})`;
 const DIFF={easy:{k:1.9,gap:.36,ch:99,sub:2,tol:.07,hold:.5},normal:{k:1.5,gap:.24,ch:2.4,sub:2,tol:.06,hold:.6},hard:{k:1.2,gap:.15,ch:1.7,sub:4,tol:.05,hold:.6}};
@@ -98,10 +100,14 @@ async function analyze(buf,d,onP){
   for(const c of cand){if(c.t<.3)continue;const L=kept[kept.length-1];
     if(L&&c.t-L.t<d.gap){if(c.s>L.s)kept[kept.length-1]=c}else kept.push(c)}
   // 템포(0.1BPM 단위)·위상 추정 → 박자 격자에 맞추기
+  const fit=B=>{const P=60/B;let re=0,im=0,sw=0;for(const c of kept){const a=6.2831853*c.t/P;re+=c.s*Math.cos(a);im+=c.s*Math.sin(a);sw+=c.s}return{m:Math.hypot(re,im)/(sw||1),ph:((Math.atan2(im,re)/6.2831853)*P+P)%P}};
   let bpm=120,phase=0,conf=0;
-  for(let B=75;B<=165;B+=.1){const P=60/B;let re=0,im=0,sw=0;for(const c of kept){const a=6.2831853*c.t/P;re+=c.s*Math.cos(a);im+=c.s*Math.sin(a);sw+=c.s}const m=Math.hypot(re,im)/(sw||1);if(m>conf){conf=m;bpm=B;phase=((Math.atan2(im,re)/6.2831853)*P+P)%P}}
-  const period=60/bpm,sub=period/d.sub;
-  for(const c of kept){const q=phase+Math.round((c.t-phase)/sub)*sub;if(Math.abs(c.t-q)<d.tol)c.t=q;else if(conf>.35)c.drop=1}
+  for(let B=75;B<=165;B+=.1){const f=fit(B);if(f.m>conf){conf=f.m;bpm=B;phase=f.ph}}
+  const bc=bpm;for(let B=bc-.15;B<=bc+.15;B+=.005){const f=fit(B);if(f.m>conf){conf=f.m;bpm=B;phase=f.ph}}
+  const period=60/bpm,sub=period/d.sub,SEG=8,lph=[];
+  for(let s=0;s<=Math.ceil(n/sr/SEG);s++){let re=0,im=0,sw=0;for(const c of kept){if(c.t<s*SEG-4||c.t>=(s+1)*SEG+4)continue;const a=6.2831853*c.t/period;re+=c.s*Math.cos(a);im+=c.s*Math.sin(a);sw+=c.s}
+    lph[s]=sw&&Math.hypot(re,im)/sw>.3?((Math.atan2(im,re)/6.2831853)*period+period)%period:phase}
+  for(const c of kept){const p0=lph[Math.floor(c.t/SEG)];const q=p0+Math.round((c.t-p0)/sub)*sub;if(Math.abs(c.t-q)<d.tol)c.t=q;else if(conf>.3)c.drop=1}
   kept.sort((a,b)=>a.t-b.t);const k2=[];
   for(const c of kept){if(c.drop||c.t<.3)continue;const L=k2[k2.length-1];if(L&&c.t-L.t<d.gap*.8){if(c.s>L.s)k2[k2.length-1]=c}else k2.push(c)}
   kept.length=0;kept.push(...k2);
