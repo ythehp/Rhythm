@@ -39,7 +39,7 @@ h1{font-size:clamp(26px,7vh,50px);letter-spacing:.22em;font-weight:900;backgroun
   <button class="play" id="play">▶</button>
   <div class="row" id="diffs"><button class="chip" data-d="easy">쉬움</button><button class="chip" data-d="normal">보통</button><button class="chip" data-d="hard">어려움</button></div>
   <div class="row"><button class="chip" id="cal">🥁 타이밍 보정</button><span class="sub" id="offTxt"></span></div>
-  <div class="row"><button class="chip" id="sfx"></button><button class="chip" id="vib"></button></div>
+  <div class="row"><button class="chip" id="sfx"></button></div>
   <div class="sub">▶ 를 눌러 내 음악 파일(mp3, wav 등)을 선택하세요</div>
 </div>
 <div class="screen" id="loading"><div class="big" id="lt">분석 중...</div><div class="sub" id="lsub"></div></div>
@@ -56,7 +56,7 @@ h1{font-size:clamp(26px,7vh,50px);letter-spacing:.22em;font-weight:900;backgroun
 </div>
 </div>
 <div id="rot">📱↻<br>폰을 가로로 돌려주세요</div>
-<label id="hap" style="position:fixed;left:-99px;top:0;opacity:0;pointer-events:none"><input type="checkbox" switch></label>
+
 <input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.flac" style="display:none">
 
 <script>
@@ -66,14 +66,14 @@ function resize(){const iw=innerWidth,ih=innerHeight,r=Math.min(devicePixelRatio
 addEventListener('resize',resize);addEventListener('orientationchange',()=>setTimeout(resize,200));resize();
 const RGB=[[77,210,255],[184,107,255],[255,95,162],[255,210,77]],rgba=(l,a)=>`rgba(${RGB[l]},${a})`;
 const DIFF={easy:{k:1.9,gap:.36,ch:99,sub:2,tol:.07,hold:.5},normal:{k:1.5,gap:.24,ch:2.4,sub:2,tol:.06,hold:.6},hard:{k:1.2,gap:.15,ch:1.7,sub:4,tol:.05,hold:.6}};
-let diff=localStorage.getItem('rg-diff')||'normal',offset=+localStorage.getItem('rg-off')||0,sfxOn=localStorage.getItem('rg-sfx')!=='0',vibOn=localStorage.getItem('rg-vib')!=='0';
+let diff=localStorage.getItem('rg-diff')||'normal',offset=+localStorage.getItem('rg-off')||0,sfxOn=localStorage.getItem('rg-sfx')!=='0';
 let ctx=null;
 function initCtx(){if(!ctx)ctx=new(window.AudioContext||window.webkitAudioContext)();if(ctx.state!=='running')ctx.resume()}
 const show=id=>{document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('on',s.id===id));$('hud').classList.toggle('on',id==='game')};
-function ui(){document.querySelectorAll('#diffs .chip').forEach(b=>b.classList.toggle('sel',b.dataset.d===diff));$('offTxt').textContent='보정값 '+(offset>=0?'+':'')+Math.round(offset)+'ms';$('sfx').textContent='🔊 효과음 '+(sfxOn?'ON':'OFF');$('vib').textContent='📳 진동 '+(vibOn?'ON':'OFF')}
+function ui(){document.querySelectorAll('#diffs .chip').forEach(b=>b.classList.toggle('sel',b.dataset.d===diff));$('offTxt').textContent='보정값 '+(offset>=0?'+':'')+Math.round(offset)+'ms';$('sfx').textContent='🔊 효과음 '+(sfxOn?'ON':'OFF')}
 document.querySelectorAll('#diffs .chip').forEach(b=>b.onclick=()=>{diff=b.dataset.d;localStorage.setItem('rg-diff',diff);ui()});
 $('sfx').onclick=()=>{sfxOn=!sfxOn;localStorage.setItem('rg-sfx',sfxOn?'1':'0');ui()};
-$('vib').onclick=()=>{vibOn=!vibOn;localStorage.setItem('rg-vib',vibOn?'1':'0');ui()};ui();
+ui();
 
 // ---------- 곡 분석 ----------
 async function analyze(buf,d,onP){
@@ -143,15 +143,13 @@ function begin(){
 function judge(l,k){
   const{lw,x0,hy}=geo();cnt[k]++;
   if(k==='m'){combo=0}else{combo++;maxC=Math.max(maxC,combo);score+={p:1000,g:700,o:400}[k]+Math.min(combo,50)*10;
-    tick(k);buzz();flash[l]=1;const x=x0+l*lw+lw/2,N=k==='p'?16:8;
+    tick(k);flash[l]=1;const x=x0+l*lw+lw/2,N=k==='p'?16:8;
     for(let i=0;i<N;i++){const an=-Math.PI*(.1+.8*Math.random()),v=140+Math.random()*320;parts.push({x,y:hy,vx:Math.cos(an)*v,vy:Math.sin(an)*v,life:1,l,s:2+Math.random()*3})}
     rings.push({x,y:hy,r:10,life:1,l});
     if(combo%50===0)for(let i=0;i<60;i++){const an=Math.random()*Math.PI*2,v=100+Math.random()*420;parts.push({x:W/2,y:H*.35,vx:Math.cos(an)*v,vy:Math.sin(an)*v,life:1,l:i%4,s:2+Math.random()*3})}}
   jd={t:JT[k],c:JC[k],life:1,pop:1};
 }
 function tick(k){if(!sfxOn||!ctx)return;const t=ctx.currentTime,o=ctx.createOscillator(),gn=ctx.createGain();o.type='sine';o.frequency.value=k==='p'?1800:1300;gn.gain.setValueAtTime(.1,t);gn.gain.exponentialRampToValueAtTime(.001,t+.05);o.connect(gn).connect(ctx.destination);o.start(t);o.stop(t+.06)}
-function hapClick(){const h=$('hap');h&&h.click()}
-function buzz(){if(!vibOn)return;if(navigator.vibrate)navigator.vibrate(10);else{hapQ=true;hapClick()}}
 function holdDone(l,n){score+=500;const{lw,x0,hy}=geo(),x=x0+l*lw+lw/2;for(let i=0;i<14;i++)parts.push({x,y:hy,vx:(Math.random()-.5)*300,vy:-100-Math.random()*300,life:1,l,s:3});rings.push({x,y:hy,r:10,life:1,l});tick('p')}
 function release(l){const n=holdAct[l];if(!n||!playing)return;holdAct[l]=null;const t=ctx.currentTime-startT-offset/1000;if(t<n.e-.12){combo=0;jd={t:'BREAK',c:JC.m,life:1,pop:0}}else holdDone(l,n)}
 function press(l,ts){
@@ -211,9 +209,9 @@ $('rAgain').onclick=()=>{initCtx();begin()};
 
 // 입력
 const laneAt=x=>{const{lw,x0}=geo();return Math.max(0,Math.min(3,Math.floor((x-x0)/lw)))};
-const lx=t=>rot?t.clientY:t.clientX,tl={};let hapQ=false,ml=-1;
+const lx=t=>rot?t.clientY:t.clientX,tl={};let ml=-1;
 cv.addEventListener('touchstart',e=>{e.preventDefault();for(const t of e.changedTouches){const l=laneAt(lx(t));tl[t.identifier]=l;press(l,e.timeStamp)}},{passive:false});
-const tend=e=>{for(const t of e.changedTouches){const l=tl[t.identifier];delete tl[t.identifier];if(l!==undefined)release(l)}if(hapQ){hapQ=false;hapClick()}};
+const tend=e=>{for(const t of e.changedTouches){const l=tl[t.identifier];delete tl[t.identifier];if(l!==undefined)release(l)}};
 cv.addEventListener('touchend',tend);cv.addEventListener('touchcancel',tend);
 cv.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse'){ml=laneAt(lx(e));press(ml,e.timeStamp)}});
 addEventListener('pointerup',e=>{if(e.pointerType==='mouse'&&ml>=0){release(ml);ml=-1}});
